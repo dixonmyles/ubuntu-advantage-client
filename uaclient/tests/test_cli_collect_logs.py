@@ -10,7 +10,6 @@ from uaclient.cli import (
     get_parser,
     main,
 )
-from uaclient.exceptions import NonRootUserError
 
 M_PATH = "uaclient.cli."
 
@@ -42,13 +41,13 @@ class TestActionCollectLogs:
         assert re.match(HELP_OUTPUT, out)
 
     @mock.patch(
-        M_PATH + "glob.glob",
+        "glob.glob",
         return_value=[
             "/var/log/ubuntu-advantage.log",
             "/var/log/ubuntu-advantage.log.1",
         ],
     )
-    @mock.patch(M_PATH + "tarfile.open")
+    @mock.patch("tarfile.open")
     @mock.patch("builtins.open")
     @mock.patch(M_PATH + "util.redact_sensitive_logs", return_value="test")
     # let's pretend all files exist
