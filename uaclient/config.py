@@ -342,11 +342,14 @@ class UAConfig:
         Such notices are seen in the Notices section from pro status output.
         They are also present in the JSON status output.
         """
-        notices = self.read_cache("notices") or []
-        notice = [label, description]
-        if notice not in notices:
-            notices.append(notice)
-            self.write_cache("notices", notices)
+        try:  # noticed accessed in non-root status call
+            notices = self.read_cache("notices") or []
+            notice = [label, description]
+            if notice not in notices:
+                notices.append(notice)
+                self.write_cache("notices", notices)
+        except PermissionError:
+            pass
 
     def remove_notice(self, label_regex: str, descr_regex: str):
         """Remove matching notices if present.
@@ -355,18 +358,21 @@ class UAConfig:
         :param descr_regex: Regex used to remove notices with matching
             descriptions.
         """
-        notices = []
-        cached_notices = self.read_cache("notices")
-        if cached_notices:
-            for notice_label, notice_descr in cached_notices:
-                if re.match(label_regex, notice_label):
-                    if re.match(descr_regex, notice_descr):
-                        continue
-                notices.append((notice_label, notice_descr))
-        if notices:
-            self.write_cache("notices", notices)
-        elif os.path.exists(self.data_path("notices")):
-            util.remove_file(self.data_path("notices"))
+        try:  # notice accessed in non-root status call
+            notices = []
+            cached_notices = self.read_cache("notices")
+            if cached_notices:
+                for notice_label, notice_descr in cached_notices:
+                    if re.match(label_regex, notice_label):
+                        if re.match(descr_regex, notice_descr):
+                            continue
+                    notices.append((notice_label, notice_descr))
+            if notices:
+                self.write_cache("notices", notices)
+            elif os.path.exists(self.data_path("notices")):
+                util.remove_file(self.data_path("notices"))
+        except PermissionError:
+            pass
 
     @property
     def log_file(self) -> str:
