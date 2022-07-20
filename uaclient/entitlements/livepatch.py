@@ -1,8 +1,25 @@
+import json
 import logging
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-from uaclient import apt, event_logger, exceptions, messages, snap, util
+from uaclient import (
+    apt,
+    event_logger,
+    exceptions,
+    files,
+    messages,
+    serviceclient,
+    snap,
+    util,
+)
+from uaclient.data_types import (
+    BoolDataValue,
+    DataObject,
+    Field,
+    StringDataValue,
+)
 from uaclient.entitlements.base import IncompatibleService, UAEntitlement
 from uaclient.entitlements.entitlement_status import ApplicationStatus
 from uaclient.types import StaticAffordance
@@ -18,7 +35,132 @@ ERROR_MSG_MAP = {
 
 LIVEPATCH_CMD = "/snap/bin/canonical-livepatch"
 
+LIVEPATCH_API_V1_KERNELS_SUPPORTED = "/v1/api/kernels/supported"
+
 event = event_logger.get_event_logger()
+
+
+class UALivepatchClient(serviceclient.UAServiceClient):
+
+    cfg_url_base_attr = "livepatch_url"
+    api_error_cls = exceptions.UrlError
+
+    def is_kernel_supported(
+        self, version: str, flavor: str, arch: str, hwe: str
+    ):
+        data = {
+            "version": version,
+            "flavor": flavor,
+            "arch": arch,
+            "hwe": hwe,
+        }
+        headers = self.headers()
+        result, _headers = self.request_url(
+            LIVEPATCH_API_V1_KERNELS_SUPPORTED, data=data, headers=headers
+        )
+
+        return isinstance(result, dict) and result.get("supported") == "yes"
+
+
+class LivepatchNotInstalled(Exception):
+    pass
+
+
+def livepatch_command_status() -> dict:
+    if not is_livepatch_installed():
+        raise LivepatchNotInstalled()
+    out, _ = util.subp([LIVEPATCH_CMD, "status", "--format", "json"])
+    return json.loads(out)
+
+
+class UnableToDetermineLivepatchSupport(Exception):
+    pass
+
+
+class LivepatchSupportCacheData(DataObject):
+    fields = [
+        Field("version", StringDataValue),
+        Field("flavor", StringDataValue),
+        Field("arch", StringDataValue),
+        Field("hwe", StringDataValue),
+        Field("supported", BoolDataValue),
+        Field("cached_at", StringDataValue),  # TODO DateValue
+    ]
+
+    def __init__(
+        self,
+        version: str,
+        flavor: str,
+        arch: str,
+        hwe: str,
+        supported: bool,
+        cached_at: str,
+    ):
+        self.version = version
+        self.flavor = flavor
+        self.arch = arch
+        self.hwe = hwe
+        self.supported = supported
+        self.cached_at = cached_at
+
+
+@lru_cache(maxsize=None)
+def on_supported_kernel(self) -> bool:
+    # first check cli
+    if is_livepatch_installed():
+        cli_supported = (
+            livepatch_command_status()
+            .get("status", {})
+            .get("supported", "unknown")
+        )
+        if cli_supported == "supported":
+            return True
+        elif cli_supported == "unsupported":
+            return False
+        # if "unknown" then continue
+
+    # TODO get kernel info
+
+    # second check cache
+    livepatch_support_cache = files.DataObjectFile(
+        LivepatchSupportCacheData,
+        files.UAFile(
+            "livepatch-kernel-support-cache.json",
+            "/run/ubuntu-advantage",
+            private=False,
+        ),
+        file_format="json",
+    )
+
+    cache_data = livepatch_support_cache.read()
+
+    if cache_data is not None:
+        # TODO check kernel info is the same as what is cached
+        if cache_data.cached_at:  # TODO actually check date
+            return cache_data.supported
+
+    # finally check api
+    lp_client = UALivepatchClient()
+    try:
+        supported = lp_client.is_kernel_supported()
+
+        # cache response before returning
+        # TODO
+        livepatch_support_cache.write(
+            LivepatchSupportCacheData(
+                version="",
+                flavor="",
+                arch="",
+                hwe="",
+                supported=supported,
+                cached_at="now",
+            )
+        )
+
+        return supported
+    except exceptions.UrlError as e:
+        logging.warning(e)
+        raise UnableToDetermineLivepatchSupport()
 
 
 def unconfigure_livepatch_proxy(
@@ -89,6 +231,10 @@ def get_config_option_value(key: str) -> Optional[str]:
         # remove quotes if present
         value = re.sub(r"\"(.*)\"", r"\g<1>", value)
     return value.strip() if value else None
+
+
+def is_livepatch_installed() -> bool:
+    return util.which(LIVEPATCH_CMD)
 
 
 class LivepatchEntitlement(UAEntitlement):
@@ -185,7 +331,7 @@ class LivepatchEntitlement(UAEntitlement):
             retry_sleeps=snap.SNAP_INSTALL_RETRIES,
         )
 
-        if not util.which(LIVEPATCH_CMD):
+        if not is_livepatch_installed():
             event.info("Installing canonical-livepatch snap")
             try:
                 util.subp(
