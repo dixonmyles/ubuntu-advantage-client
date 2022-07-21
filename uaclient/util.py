@@ -16,6 +16,7 @@ from typing import (
     Dict,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -311,6 +312,140 @@ def get_machine_id(cfg) -> str:
     return machine_id
 
 
+RE_KERNEL_UNAME = (
+    r"^"
+    r"(?P<version>[\d]+[.-][\d]+[.-][\d]+)"
+    r"-"
+    r"(?P<abi>[\d]+)"
+    r"-"
+    r"(?P<flavor>[A-Za-z0-9_-]+)"
+    r"$"
+)
+RE_KERNEL_PROC_VERSION_SIGNATURE = (
+    r"^"
+    r"(?P<version>[\d]+[.-][\d]+[.-][\d]+)"
+    r"-"
+    r"(?P<abi>[\d]+)"
+    r"[.-]"
+    r"(?P<subrev>[\d]+)"
+    r"(~(?P<hwerev>[\d.]+))?"
+    r"-"
+    r"(?P<flavor>[A-Za-z0-9_-]+)"
+    r"$"
+)
+RE_KERNEL_VERSION_SPLIT = (
+    r"^"
+    r"(?P<major>[\d]+)"
+    r"[.-]"
+    r"(?P<minor>[\d]+)"
+    r"[.-]"
+    r"(?P<patch>[\d]+)"
+    r"$"
+)
+
+
+KernelInfo = NamedTuple(
+    "KernelInfo",
+    [
+        ("uname_release", str),
+        ("proc_version_signature_full", str),
+        ("proc_version_signature_version", str),
+        ("version", str),
+        ("major", str),
+        ("minor", str),
+        ("patch", str),
+        ("abi", str),
+        ("subrev", str),
+        ("hwerev", str),
+        ("flavor", str),
+    ],
+)
+
+
+@lru_cache(maxsize=None)
+def get_kernel_info() -> KernelInfo:
+    uname_release = os.uname().release
+
+    proc_version_signature_full = ""
+    proc_version_signature_version = ""
+    try:
+        proc_version_signature_full = load_file("/proc/version_signature")
+        proc_version_signature_version = proc_version_signature_full.split(
+            " "
+        )[1]
+    except:
+        logging.warning(
+            "failed to process /proc/version_signature. using uname for all kernel info"
+        )
+
+    if proc_version_signature_full != "":
+        match = re.match(
+            RE_KERNEL_PROC_VERSION_SIGNATURE, proc_version_signature_version
+        )
+        if match is None:
+            raise exceptions.UserFacingError(
+                "Failed to parse kernel: {}".format(
+                    proc_version_signature_version
+                )
+            )
+        version = match.group("version")
+        abi = match.group("abi")
+        subrev = match.group("subrev")
+        hwerev = match.group("hwerev") or ""
+        flavor = match.group("flavor")
+    else:
+        match = re.match(RE_KERNEL_UNAME, uname_release)
+        if match is None:
+            raise exceptions.UserFacingError(
+                "Failed to parse kernel: {}".format(uname_release)
+            )
+        version = match.group("version")
+        abi = match.group("abi")
+        subrev = ""
+        hwerev = ""
+        flavor = match.group("flavor")
+
+    version_split_match = re.match(RE_KERNEL_VERSION_SPLIT, version)
+    if version_split_match is None:
+        raise exceptions.UserFacingError(
+            "Failed to split kernel version: {}".format(version)
+        )
+
+    major = version_split_match.group("major")
+    minor = version_split_match.group("minor")
+    patch = version_split_match.group("patch")
+
+    return KernelInfo(
+        uname_release=uname_release,
+        proc_version_signature_full=proc_version_signature_full,
+        proc_version_signature_version=proc_version_signature_version,
+        version=version,
+        major=major,
+        minor=minor,
+        patch=patch,
+        abi=abi,
+        subrev=subrev,
+        hwerev=hwerev,
+        flavor=flavor,
+    )
+
+
+@lru_cache(maxsize=None)
+def get_lscpu_arch() -> str:
+    """used for livepatch"""
+    out, _err = subp(["lscpu"])
+    for line in out.splitlines():
+        if line.strip().startswith("Architecture"):
+            return line.split(":")[1].strip()
+    raise Exception()  # TODO
+
+
+@lru_cache(maxsize=None)
+def get_dpkg_arch() -> str:
+    out, _err = subp(["dpkg", "--print-architecture"])
+    return out.strip()
+
+
 @lru_cache(maxsize=None)
 def get_platform_info() -> Dict[str, str]:
     """
@@ -344,10 +479,8 @@ def get_platform_info() -> Dict[str, str]:
         }
     )
 
-    uname = os.uname()
-    platform_info["kernel"] = uname.release
-    out, _err = subp(["dpkg", "--print-architecture"])
-    platform_info["arch"] = out.strip()
+    platform_info["kernel"] = get_kernel_info().full_version_flavor_string
+    platform_info["arch"] = get_dpkg_arch()
 
     return platform_info
 

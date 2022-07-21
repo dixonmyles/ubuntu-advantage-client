@@ -23,11 +23,6 @@ from uaclient.entitlements.entitlement_status import (
 from uaclient.types import MessagingOperationsDict, StaticAffordance
 from uaclient.util import is_config_value_true
 
-RE_KERNEL_UNAME = (
-    r"(?P<major>[\d]+)[.-](?P<minor>[\d]+)[.-](?P<patch>[\d]+\-[\d]+)"
-    r"-(?P<flavor>[A-Za-z0-9_-]+)"
-)
-
 event = event_logger.get_event_logger()
 
 
@@ -559,24 +554,24 @@ class UAEntitlement(metaclass=abc.ABCMeta):
                     title=self.title, series=platform["version"]
                 ),
             )
-        kernel = platform["kernel"]
+        # TODO catch error
+        kernel_info = util.get_kernel_info()
         affordance_kernels = affordances.get("kernelFlavors", None)
         affordance_min_kernel = affordances.get("minKernelVersion")
-        match = re.match(RE_KERNEL_UNAME, kernel)
         if affordance_kernels is not None:
-            if not match or match.group("flavor") not in affordance_kernels:
+            if kernel_info.flavor not in affordance_kernels:
                 return (
                     ApplicabilityStatus.INAPPLICABLE,
                     messages.INAPPLICABLE_KERNEL.format(
                         title=self.title,
-                        kernel=kernel,
+                        kernel=kernel_info.full_version_flavor_string,
                         supported_kernels=", ".join(affordance_kernels),
                     ),
                 )
         if affordance_min_kernel:
             invalid_msg = messages.INAPPLICABLE_KERNEL_VER.format(
                 title=self.title,
-                kernel=kernel,
+                kernel=kernel_info.full_version_flavor_string,
                 min_kernel=affordance_min_kernel,
             )
             try:
@@ -590,15 +585,11 @@ class UAEntitlement(metaclass=abc.ABCMeta):
                 )
                 return (ApplicabilityStatus.INAPPLICABLE, invalid_msg)
 
-            if not match:
-                return ApplicabilityStatus.INAPPLICABLE, invalid_msg
-            kernel_major = int(match.group("major"))
-            kernel_minor = int(match.group("minor"))
-            if kernel_major < min_kern_major:
+            if int(kernel_info.major_version) < min_kern_major:
                 return ApplicabilityStatus.INAPPLICABLE, invalid_msg
             elif (
-                kernel_major == min_kern_major
-                and kernel_minor < min_kern_minor
+                int(kernel_info.major_version) == min_kern_major
+                and int(kernel_info.minor_version) < min_kern_minor
             ):
                 return ApplicabilityStatus.INAPPLICABLE, invalid_msg
         return ApplicabilityStatus.APPLICABLE, None

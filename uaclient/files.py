@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Optional, Type, TypeVar
+from typing import Dict, Generic, Optional, Type, TypeVar
 
 import yaml
 
@@ -67,7 +67,7 @@ class UAFile:
 DOFType = TypeVar("DOFType", bound=data_types.DataObject)
 
 
-class DataObjectFile:
+class DataObjectFile(Generic[DOFType]):
     def __init__(
         self,
         data_object_cls: Type[DOFType],
