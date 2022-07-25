@@ -1,7 +1,13 @@
 import os
 
 from uaclient import util
-from uaclient.files import MachineTokenFile, UAFile
+from uaclient.data_types import (
+    DataObject,
+    Field,
+    IntDataValue,
+    StringDataValue,
+)
+from uaclient.files import DataObjectFile, MachineTokenFile, UAFile
 
 
 class TestUAFile:
@@ -14,6 +20,38 @@ class TestUAFile:
         res = util.load_file(path)
         assert res == file.read()
         assert res == content
+
+
+class NestedTestData(DataObject):
+    fields = [
+        Field("integer", IntDataValue),
+    ]
+
+    def __init__(self, integer: int):
+        self.integer = integer
+
+
+class TestData(DataObject):
+    fields = [
+        Field("string", StringDataValue),
+        Field("nested", NestedTestData),
+    ]
+
+    def __init__(self, string: str, nested: NestedTestData):
+        self.string = string
+        self.nested = nested
+
+
+class TestDataObjectFile:
+    def test_write_valid(self, tempdir):
+        dof = DataObjectFile(
+            TestData,
+            UAFile(
+                file_name,
+                tmpdir.strpath,
+                False,
+            ),
+        )
 
 
 class TestMachineTokenFile:

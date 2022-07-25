@@ -2,9 +2,19 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Optional
+from enum import Enum
+from typing import Dict, Generic, Optional, Type, TypeVar
 
-from uaclient import defaults, event_logger, exceptions, messages, util
+import yaml
+
+from uaclient import (
+    data_types,
+    defaults,
+    event_logger,
+    exceptions,
+    messages,
+    util,
+)
 from uaclient.contract_data_types import PublicMachineTokenData
 
 event = event_logger.get_event_logger()
@@ -53,6 +63,52 @@ class UAFile:
 
     def delete(self):
         util.remove_file(self.path)
+
+
+class DataObjectFileFormat(Enum):
+    JSON = object()
+    YAML = object()
+
+
+DOFType = TypeVar("DOFType", bound=data_types.DataObject)
+
+
+class DataObjectFile(Generic[DOFType]):
+    def __init__(
+        self,
+        data_object_cls: Type[DOFType],
+        ua_file: UAFile,
+        file_format: DataObjectFileFormat = DataObjectFileFormat.JSON,
+    ):
+        self.data_object_cls = data_object_cls
+        self.ua_file = ua_file
+        self.file_format = file_format
+
+    def read(self) -> Optional[DOFType]:
+        raw_data = self.ua_file.read()
+        if raw_data is None:
+            return None
+
+        parsed_data = None
+        if self.file_format == DataObjectFileFormat.JSON:
+            parsed_data = json.loads(raw_data)
+        elif self.file_format == DataObjectFileFormat.YAML:
+            parsed_data = yaml.safe_load(raw_data)
+
+        if parsed_data is None:
+            return None
+
+        return self.data_object_cls.from_dict(parsed_data)
+
+    def write(self, content: DOFType):
+        data = content.to_dict()
+
+        if self.file_format == DataObjectFileFormat.JSON:
+            str_content = json.dumps(data)
+        elif self.file_format == DataObjectFileFormat.YAML:
+            str_content = yaml.dump(data, default_flow_style=False)
+
+        self.ua_file.write(str_content)
 
 
 class MachineTokenFile:
