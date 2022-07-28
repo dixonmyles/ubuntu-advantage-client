@@ -20,6 +20,7 @@ Feature: Creating golden images based on Cloud Ubuntu Pro instances
         attached: true
         """
         When I run `apt install -y jq` with sudo
+        When I save the `activityInfo.activityToken` value from the contract
         When I save the `activityInfo.activityID` value from the contract
         When I run `pro enable fips-updates --assume-yes` with sudo
         And I run `pro status --format yaml` with sudo
@@ -32,6 +33,12 @@ Feature: Creating golden images based on Cloud Ubuntu Pro instances
 
         When I take a snapshot of the machine
 
+        When I reboot the machine
+
+        When I run `python3 /usr/lib/ubuntu-advantage/timer.py` with sudo
+        Then I verify that `activityInfo.activityToken` value has been updated on the contract
+        Then I verify that `activityInfo.activityID` value has not been updated on the contract
+
         When I launch a `clone` machine from the snapshot
         # The clone will run auto-attach on boot
         When I run `pro status --wait` `with sudo` on the `clone` machine
@@ -40,10 +47,12 @@ Feature: Creating golden images based on Cloud Ubuntu Pro instances
         """
         attached: true
         """
+
+        When I run `python3 /usr/lib/ubuntu-advantage/timer.py` `with sudo` on the `clone` machine
+        Then I verify that `activityInfo.activityToken` value has been updated on the contract on the `clone` machine
         Then I verify that `activityInfo.activityID` value has been updated on the contract on the `clone` machine
 
 
-        When I run `pro enable fips-updates --assume-yes` `with sudo` on the `clone` machine
         When I run `pro status --format yaml` `with sudo` on the `clone` machine
         Then stdout matches regexp:
         """
@@ -52,6 +61,7 @@ Feature: Creating golden images based on Cloud Ubuntu Pro instances
         """
 
         When I reboot the machine: `clone`
+
         When I run `pro status --format yaml` `with sudo` on the `clone` machine
         Then stdout matches regexp:
         """
