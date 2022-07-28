@@ -306,6 +306,14 @@ class GCPProAccountError(UserFacingError):
         )
 
 
+class EntitlementNotEnabledError(UserFacingError):
+    pass
+
+
+class FullAutoAttachFailureError(UserFacingError):
+    pass
+
+
 class CloudFactoryError(Exception):
     def __init__(self, cloud_type: Optional[str]) -> None:
         self.cloud_type = cloud_type

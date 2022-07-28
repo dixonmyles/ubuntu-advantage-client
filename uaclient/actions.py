@@ -11,6 +11,8 @@ from uaclient import (
     messages,
 )
 from uaclient import status as ua_status
+from uaclient import util
+from uaclient.clouds import AutoAttachCloudInstance  # noqa: F401
 from uaclient.clouds import identity
 
 LOG = logging.getLogger("ua.actions")
@@ -117,3 +119,62 @@ def status(
         ret = 0
 
     return status, ret
+
+
+def get_cloud_instance(
+    cfg: config.UAConfig,
+) -> Optional[AutoAttachCloudInstance]:
+    disable_auto_attach = util.is_config_value_true(
+        config=cfg.cfg, path_to_value="features.disable_auto_attach"
+    )
+    if disable_auto_attach:
+        msg = "Skipping auto-attach. Config disable_auto_attach is set."
+        logging.debug(msg)
+        print(msg)
+        return None
+
+    instance = None  # type: Optional[AutoAttachCloudInstance]
+    try:
+        instance = identity.cloud_instance_factory()
+    except exceptions.CloudFactoryError as e:
+        if cfg.is_attached:
+            # We are attached on non-Pro Image, just report already attached
+            raise exceptions.AlreadyAttachedError(cfg)
+        if isinstance(e, exceptions.CloudFactoryNoCloudError):
+            raise exceptions.UserFacingError(
+                messages.UNABLE_TO_DETERMINE_CLOUD_TYPE
+            )
+        if isinstance(e, exceptions.CloudFactoryNonViableCloudError):
+            raise exceptions.UserFacingError(messages.UNSUPPORTED_AUTO_ATTACH)
+        if isinstance(e, exceptions.CloudFactoryUnsupportedCloudError):
+            raise exceptions.NonAutoAttachImageError(
+                messages.UNSUPPORTED_AUTO_ATTACH_CLOUD_TYPE.format(
+                    cloud_type=e.cloud_type
+                )
+            )
+        # we shouldn't get here, but this is a reasonable default just in case
+        raise exceptions.UserFacingError(
+            messages.UNABLE_TO_DETERMINE_CLOUD_TYPE
+        )
+
+    if not instance:
+        # we shouldn't get here, but this is a reasonable default just in case
+        raise exceptions.UserFacingError(
+            messages.UNABLE_TO_DETERMINE_CLOUD_TYPE
+        )
+    return instance
+
+
+def detach_before_auto_attach(cfg: config.UAConfig):
+    from uaclient.cli import _detach
+
+    current_iid = identity.get_instance_id()
+    if cfg.is_attached:
+        prev_iid = cfg.read_cache("instance-id")
+        if str(current_iid) == str(prev_iid):
+            raise exceptions.AlreadyAttachedOnPROError(str(current_iid))
+        print("Re-attaching Ubuntu Pro subscription on new instance")
+        if _detach(cfg, assume_yes=True) != 0:
+            raise exceptions.UserFacingError(
+                messages.DETACH_AUTOMATION_FAILURE
+            )

@@ -54,6 +54,10 @@ class UAFile:
     def delete(self):
         system.remove_file(self.path)
 
+    def create(self):
+        f = open(self.path, "x")
+        f.close()
+
 
 class MachineTokenFile:
     def __init__(
